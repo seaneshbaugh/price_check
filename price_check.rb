@@ -46,7 +46,7 @@ class PriceChecker
         Search all known sites for the cards in list1.txt and list2.txt and then open a Pry debug session.
   eos
 
-  Version = '0.0.1'
+  Version = '0.0.2'
 
   def initialize
     @options = OpenStruct.new
@@ -66,103 +66,17 @@ class PriceChecker
 
     @agent.user_agent = 'Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.107 Safari/537.36'
 
-    agent = @agent
+    @stores = {}
 
-    @stores = {
-      'abugames.com' => Store.new('abugames.com') do |card_name, card_set = nil, foil = nil|
-        search_page = agent.get("http://www.abugames.com/shop.cgi?command=search&log=1&cardname=#{card_name.downcase}&edition=0&displaystyle=list", :referer => 'http://www.abugames.com/')
+    Dir.glob("#{File.dirname(File.absolute_path(__FILE__))}/stores/*.rb") do |file|
+      require file
 
-        cards = search_page.parser.css('[name=inventoryform] .cardinfo').map do |card_info|
-          name = card_info.css('.cardblocklink').first.text.strip.gsub(' - FOIL', '')
+      store_class = File.basename(file, '.*').camelize.safe_constantize
 
-          set = card_info.css('span')[1].text.split('/').first.strip.gsub(' Foil', '')
+      raise NameError, "Expected \"stores/#{File.basename(file)}\" to define a class named \"#{File.basename(file, '.*').camelize}\"." unless store_class
 
-          foil = card_info.css('span')[1].text.split('/').first.strip.downcase.include?('foil')
-
-          link = "http://www.abugames.com#{card_info.css('.cardblocklink').first.attributes['href'].text}"
-
-          card_info.css('table').last.css('tr:not(:last-child)').map do |inventory_item|
-            parts = inventory_item.css('td')
-
-            price = parts[3].text.strip
-
-            condition = parts[1].text.strip
-
-            quanity_available = parts[2].text.strip
-
-            Card.new(name, set, price, condition, foil, quanity_available, link)
-          end
-        end.flatten.select { |card| card.name.downcase == card_name.downcase }
-
-        @cards[card_name] = cards
-      end,
-      'starcitygames.com' => Store.new('starcitygames.com') do |card_name, card_set = nil, foil = nil|
-        page = 1
-
-        cards = []
-
-http://sales.starcitygames.com/autocomplete/products_only.php?callback=jQuery17105610187854617834_1395346318327&term=E&_=1395346356416
-
-        loop do
-puts "http://sales.starcitygames.com/search.php?substring=#{card_name.downcase}&go.x=17&go.y=3&go=GO&t_all=All&start_date=2010-01-29&end_date=2012-04-22&order_1=finish&limit=25&action=Show%2BDecks&card_qty%5B1%5D=1&start=#{(page - 1) * 50}"
-
-          search_page = agent.get("http://sales.starcitygames.com/search.php?substring=#{card_name.downcase}&go.x=17&go.y=3&go=GO&t_all=All&start_date=2010-01-29&end_date=2012-04-22&order_1=finish&limit=25&action=Show%2BDecks&card_qty%5B1%5D=1&start=#{(page - 1) * 50}", :referer => 'http://www.starcitygames.com/index.php')
-puts search_page.body
-          search_page.parser.css('.deckdbbody_row').each do |card_info|
-            current_row = card_info
-
-            loop do
-              break if current_row.attributes['class'] == 'deckdbbody_row'
-
-              name_container = card_info.css('td.deckdbbody.search_results_1')
-
-              name = nil
-
-              if name_container
-                name = name_container.text.strip
-
-                break
-              else
-                current_row = current_row.previous_element
-              end
-            end
-
-            cards << name
-          end
-
-          next_link = search_page.parser.css('#content > table:first-child > tbody > tr:nth-child(2) > td > div:first-child > a').last
-
-          break unless next_link && next_link.text.include?('Next')
-
-          page += 1
-        end
-
-        cards
-      end,
-      'wagicalplace.com' => Store.new('wagicalplace.com') do |card_name, card_set = nil, foil = nil|
-        search_page = agent.post("http://wagicalplace.com/index.php?mode=search", { 'for' => card_name.downcase, 'x' => '0', 'y' => '0' }, 'Referer' => 'http://wagicalplace.com/index.php?mode=left1')
-
-        cards = search_page.parser.css('tr').map do |card_info|
-          name = card_info.css('td')[4].text.strip.gsub(/ \(.+\)/, '').gsub(/ #\d+/, '')
-
-          set = card_info.css('td')[2].text.strip
-
-          price = card_info.css('td')[5].text.strip
-
-          condition = 'NM'
-
-          foil = card_info.css('td')[4].text.strip.downcase.include?(' (foil)')
-
-          quanity_available = card_info.css('td')[1].text.strip.gsub('/', '')
-
-          link = "http://wagicalplace.com/"
-
-          Card.new(name, set, price, condition, foil, quanity_available, link)
-        end.select { |card| card.name.downcase == card_name.downcase }
-
-        @cards[card_name] = cards
-      end
-    }
+      @stores[store_class.name] = store_class
+    end
 
     @cards = []
   end
@@ -228,17 +142,18 @@ puts search_page.body
       end
 
       @lists = argv
-    rescue => exception
-      puts "Error: #{exception.message}\n#{e.backtrace}\n\n"
-
+    rescue
       puts Usage
 
-      exit
+      puts
+
+      raise
     end
   end
 
   def run!
     self.parse_options(ARGV)
+
     self.search
 
     self.print_results
@@ -259,7 +174,7 @@ puts search_page.body
           next
         end
 
-        @stores[store].search(card)
+        @stores[store].search(@agent, card)
       end
     end
   end
