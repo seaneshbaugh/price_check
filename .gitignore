@@ -1,0 +1,7 @@
+.DS_Store
+._*
+.idea/
+/lists/*.txt
+/output/*.txt
+/output/*.html
+/output/*.log
