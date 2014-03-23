@@ -18,13 +18,13 @@ class PriceChecker
       ruby price_check.rb [options] list1.txt list2.txt
 
     Options:
-      -c, [--cards]                # Comma delimited list of cards to search for
+      -c, [--cards=CARDS]          # Comma delimited list of cards to search for
       -f, [--force]                # Ignore file collisions
+      -p, [--pretend]              # Run but do not output any files
       -s, [--stores=STORES]        # Comma delimited list of stores (as domain names) to search
       -S, [--skip]                 # Skip file collisions
 
-      -p, [--pretend]              # Run but do not output any files
-      -q, [--quiet]                # Supress status output
+      -q, [--quiet]                # Suppress status output
       -V, [--verbose]              # Show extra output
       -y, [--pry]                  # Pry after completing
 
@@ -50,7 +50,7 @@ class PriceChecker
         Search all known stores for "Haakon, Stromgald Scourge" and "Force of Will", ignores any lists.
   eos
 
-  Version = '0.0.3'
+  Version = '0.0.4'
 
   def initialize
     @options = OpenStruct.new
@@ -76,12 +76,16 @@ class PriceChecker
     Dir.glob("#{File.dirname(File.absolute_path(__FILE__))}/stores/*.rb") do |file|
       require file
 
-      store_class = File.basename(file, '.*').camelize.safe_constantize
+      store_class_name = File.basename(file, '.*').camelize
 
-      raise NameError, "Expected \"stores/#{File.basename(file)}\" to define a class named \"#{File.basename(file, '.*').camelize}\"." unless store_class
+      store_class = store_class_name.safe_constantize
+
+      raise LoadError, "Expected #{file} to define #{store_class_name}" unless store_class
 
       @stores[store_class.name] = store_class
     end
+
+    @results = {}
   end
 
   def parse_options(argv)
@@ -99,16 +103,16 @@ class PriceChecker
           @options.force = force
         end
 
+        ops.on('-p', '--pretend', 'Run but do not output any files') do |pretend|
+          @options.pretend = pretend
+        end
+
         ops.on('-s', '--stores STORES', 'Comma delimited list of stores (as domain names) to search') do |stores|
           @options.stores_to_search = stores.split(',')
         end
 
         ops.on('-S', '--skip', 'Skip file collisions') do |skip|
           @options.skip = skip
-        end
-
-        ops.on('-p', '--pretend', 'Run but do not output any files') do |pretend|
-          @options.pretend = pretend
         end
 
         ops.on('-q', '--quiet', 'Supress status output') do |quiet|
@@ -135,7 +139,7 @@ class PriceChecker
           exit
         end
 
-        ops.on('-v', '--version', 'Show gatherer.rb version number and quit') do |version|
+        ops.on('-v', '--version', 'Show price_check.rb version number and quit') do |version|
           puts "price_check.rb #{Version}"
 
           exit
@@ -152,14 +156,15 @@ class PriceChecker
         @lists = { 'Manual List' => @options.cards }
       else
         @lists = argv.inject({}) do |acc, list|
-          acc[list] = File.readlines("lists/#{list}").map { |line| line.strip }.reject { |line| line.blank? || line.start_with?('#') }
+          list_file_name = "lists/#{list}"
+
+          raise LoadError, "Unable to read list file #{list_file_name}" unless File.readable?(list_file_name) && File.file?(list_file_name)
+
+          acc[list] = File.readlines(list_file_name).map { |line| line.strip }.reject { |line| line.blank? || line.start_with?('#') }
 
           acc
         end
-
       end
-
-      @results = {}
     rescue
       puts Usage
 
