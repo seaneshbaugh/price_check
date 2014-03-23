@@ -18,6 +18,7 @@ class PriceChecker
       ruby price_check.rb [options] list1.txt list2.txt
 
     Options:
+      -c, [--cards]                # Comma delimited list of cards to search for
       -f, [--force]                # Ignore file collisions
       -s, [--stores=STORES]        # Comma delimited list of stores (as domain names) to search
       -S, [--skip]                 # Skip file collisions
@@ -39,18 +40,22 @@ class PriceChecker
         ruby price_check.rb list.txt
         Search all known sites for the cards in list.txt
 
-        ruby price_check.rb -s abugames.com,starcitygames.com list.txt
-        Search abugames.com and starcitygames.com for the cards in list.txt
+        ruby price_check.rb -s abugames.com,channelfireball.com list.txt
+        Search abugames.com and channelfireball.com for the cards in list.txt
 
         ruby price_check.rb -y list1.txt list2.txt
         Search all known sites for the cards in list1.txt and list2.txt and then open a Pry debug session.
+
+        ruby price_check.rb -c "Haakon, Stromgald Scourge","Force of Will"
+        Search all known stores for "Haakon, Stromgald Scourge" and "Force of Will", ignores any lists.
   eos
 
-  Version = '0.0.2'
+  Version = '0.0.3'
 
   def initialize
     @options = OpenStruct.new
 
+    @options.cards = []
     @options.force = false
     @options.stores_to_search = []
     @options.skip = false
@@ -77,8 +82,6 @@ class PriceChecker
 
       @stores[store_class.name] = store_class
     end
-
-    @cards = []
   end
 
   def parse_options(argv)
@@ -87,6 +90,10 @@ class PriceChecker
         ops.banner = Usage
 
         ops.separator('')
+
+        ops.on('-c', '--cards CARDS', 'Comma delimited list of cards to search for') do |cards|
+          @options.cards = cards.split(',')
+        end
 
         ops.on('-f', '--force', 'Ignore file collisions') do |force|
           @options.force = force
@@ -141,7 +148,18 @@ class PriceChecker
         @options.stores_to_search = @stores.map { |name, _| name }
       end
 
-      @lists = argv
+      if @options.cards.present?
+        @lists = { 'Manual List' => @options.cards }
+      else
+        @lists = argv.inject({}) do |acc, list|
+          acc[list] = File.readlines("lists/#{list}").map { |line| line.strip }.reject { |line| line.blank? || line.start_with?('#') }
+
+          acc
+        end
+
+      end
+
+      @results = {}
     rescue
       puts Usage
 
@@ -164,41 +182,57 @@ class PriceChecker
   end
 
   def search
-    @cards = ['Shatter', 'Entomb']
+    @results = {}
 
-    @cards.each do |card|
-      @options.stores_to_search.each do |store|
-        if @stores[store].blank?
-          puts "Warning: unknown store \"#{store}\""
+    @lists.each do |list, cards|
+      @results[list] = cards.inject({}) do |accl, card|
+        accl[card.strip] = @options.stores_to_search.inject({}) do |accs, store|
+          if @stores[store].blank?
+            puts "Warning: unknown store \"#{store}\""
 
-          next
+            next
+          end
+
+          accs[store] = @stores[store].search(@agent, card.strip)
+
+          accs
         end
 
-        @stores[store].search(@agent, card)
+        accl
       end
     end
   end
 
   def print_results
-    @cards.each do |card|
-      puts '=' * card.length
+    @results.each do |list, cards|
+      puts '*' * list.length
 
-      puts card
+      puts list
 
-      puts '=' * card.length
+      puts '*' * list.length
 
-      @options.stores_to_search.each do |store|
-        if @stores[store].blank?
-          next
-        end
-
-        puts store
-
-        puts '-' * store.length
-
-        puts@stores[store].cards[card]
-
+      cards.each do |card, stores|
         puts
+
+        puts '=' * card.length
+
+        puts card
+
+        puts '=' * card.length
+
+        @options.stores_to_search.each do |store|
+          if stores[store].blank?
+            next
+          end
+
+          puts
+
+          puts store
+
+          puts '-' * store.length
+
+          puts stores[store]
+        end
       end
     end
   end
