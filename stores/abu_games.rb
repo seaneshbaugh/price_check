@@ -4,7 +4,7 @@ class AbuGames < Store
   def self.search(agent, card_name, card_set = nil, foil = nil)
     search_page = agent.get("http://www.abugames.com/shop.cgi?command=search&log=1&cardname=#{card_name.downcase}&edition=0&displaystyle=list", :referer => 'http://www.abugames.com/')
 
-    cards = search_page.parser.css('[name=inventoryform] .cardinfo').map do |card_info|
+    search_page.parser.css('[name=inventoryform] .cardinfo').map do |card_info|
       name = card_info.css('.cardblocklink').first.text.strip.gsub(' - FOIL', '')
 
       set = card_info.css('span')[1].text.split('/').first.strip.gsub(' Foil', '')
